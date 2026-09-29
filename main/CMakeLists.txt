@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "cam_config.c"
+        "wifi.c"
+        "camera.c"
+        "register.c"
+        "ed25519.c"
+        "rtsp_push.c"
+    INCLUDE_DIRS "."
+    PRIV_REQUIRES
+        esp_wifi
+        esp_netif
+        esp_http_client
+        esp_timer
+        mbedtls
+        json
+        nvs_flash
+        fatfs
+        sdmmc
+        esp_driver_spi
+        esp_driver_sdspi
+)

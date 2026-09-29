@@ -1,0 +1,6 @@
+# 生成物（配置基线是 sdkconfig.defaults / sdkconfig.defaults.esp32s3）
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+

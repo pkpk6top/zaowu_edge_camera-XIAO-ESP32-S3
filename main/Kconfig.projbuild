@@ -1,0 +1,41 @@
+menu "Camera Agent Configuration"
+
+    comment "以下默认值只在「既无 SD 卡配置、也无 NVS 备份」时生效（出厂固件兜底）。"
+    comment "现场改配置请编辑 SD 卡根目录的 camera.json，不要重新编译固件。"
+
+    config CAM_ID
+        string "默认 camera_id"
+        default "cam-03"
+
+    config CAM_WORKSHOP
+        string "默认 workshop_id"
+        default "ws-001"
+
+    config CAM_REGISTER_URL
+        string "默认 register_url"
+        default "https://cloud.example.com/api/camera/register"
+
+    config CAM_WIFI_SSID
+        string "默认 Wi-Fi SSID"
+        default ""
+
+    config CAM_WIFI_PASSWORD
+        string "默认 Wi-Fi 密码"
+        default ""
+
+    config CAM_REGISTER_USE_SIGNATURE
+        bool "注册时带 ed25519 签名"
+        default y
+        help
+            开启后注册请求会带上 public_key / signature / timestamp 三个字段，
+            与边缘 agent 的注册口径一致（被签名的规范串为 camera_id\\nworkshop_id\\npublic_key\\ntimestamp）。
+            设备身份私钥首次启动时生成并存入 NVS，不落盘到可读文件。
+
+    config CAM_FRAME_BUF_COUNT
+        int "帧缓冲个数"
+        range 1 3
+        default 2
+        help
+            每个缓冲是整帧 JPEG，占用 PSRAM。VGA/JPEG 双缓冲约 600KB。
+
+endmenu

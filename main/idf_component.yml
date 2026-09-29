@@ -1,0 +1,12 @@
+## 摄像头端固件依赖。
+##
+## esp_media_service / esp_rtsp_service / esp_service 来自 ESP-ADF（组件注册表）。
+## 推流走 esp_rtsp_service 的 SINK 角色：它使用 ANNOUNCE + SETUP + RECORD，
+## 与边缘 agent 的 ingest 服务端（只实现这三条）正好对上。
+dependencies:
+  idf: ">=5.5"
+  ## 判定用：约束改成 *，看是「名字查不到」还是「版本不匹配」
+  espressif/esp32-camera: "*"
+  espressif/esp_media_service: "^0.5.1"
+  espressif/esp_rtsp_service: "^0.5.1"
+  espressif/esp_service: "^0.5.1"

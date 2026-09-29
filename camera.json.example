@@ -1,0 +1,45 @@
+{
+  "camera_id": "cam-03",
+  "workshop_id": "ws-001",
+  "register_url": "https://cloud.example.com/api/camera/register",
+
+  "wifi": {
+    "ssid": "workshop-ap",
+    "password": "xxxxxxxx"
+  },
+
+  "video": {
+    "resolution": "VGA",
+    "jpeg_quality": 10,
+    "fps": 30,
+    "fb_count": 2,
+    "vflip": 1,
+    "hmirror": 1
+  },
+
+  "image": {
+    "awb": 1,
+    "awb_gain": 1,
+    "wb_mode": 0,
+    "aec": 1,
+    "aec2": 1,
+    "ae_level": 0,
+    "agc": 1,
+    "gainceiling": 1,
+    "brightness": 0,
+    "contrast": 1,
+    "saturation": 0,
+    "lenc": 1,
+    "bpc": 1,
+    "wpc": 1,
+    "raw_gma": 1,
+    "special_effect": 0
+  },
+
+  "codec": "MJPEG",
+
+  "retry": {
+    "register_max_attempts": 10,
+    "register_backoff_ms": 5000
+  }
+}
