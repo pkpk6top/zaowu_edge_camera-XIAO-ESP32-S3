@@ -145,7 +145,7 @@ static esp_err_t ensure_time_synced(void)
     if (!sntp_started) {
         esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
         cfg.start = true;
-        cfg.wait_for_sync = false; /* 用下面的 sync_wait 自己控超时 */
+        cfg.wait_for_sync = true; /* 创建同步信号量，供下面的 sync_wait 限时等待 */
         esp_err_t err = esp_netif_sntp_init(&cfg);
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
             ESP_LOGE(TAG, "SNTP 初始化失败: %s", esp_err_to_name(err));
