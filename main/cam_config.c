@@ -1,5 +1,6 @@
 #include "cam_config.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +53,7 @@ static void fill_defaults(cam_config_t *c)
     str_copy(c->camera_id, sizeof(c->camera_id), CONFIG_CAM_ID);
     str_copy(c->workshop_id, sizeof(c->workshop_id), CONFIG_CAM_WORKSHOP);
     str_copy(c->register_url, sizeof(c->register_url), CONFIG_CAM_REGISTER_URL);
+    str_copy(c->rtsp_push_url, sizeof(c->rtsp_push_url), CONFIG_CAM_RTSP_PUSH_URL);
     str_copy(c->wifi_ssid, sizeof(c->wifi_ssid), CONFIG_CAM_WIFI_SSID);
     str_copy(c->wifi_password, sizeof(c->wifi_password), CONFIG_CAM_WIFI_PASSWORD);
 
@@ -98,6 +100,29 @@ static void fill_defaults(cam_config_t *c)
     c->register_backoff_ms   = 5000;
 
     c->source = CAM_CFG_SRC_DEFAULT;
+}
+
+/* 同一校验用于 SD、NVS 和默认配置，旧 register_url 不选择运行模式。 */
+static esp_err_t validate_config(const cam_config_t *c)
+{
+    if (c->camera_id[0] == '\0' || c->workshop_id[0] == '\0' || c->wifi_ssid[0] == '\0') {
+        ESP_LOGE(TAG, "缺少必填字段：camera_id / workshop_id / wifi.ssid");
+        return ESP_ERR_INVALID_STATE;
+    }
+#if CONFIG_CAM_LEGACY_CLOUD_REGISTER
+    if (c->register_url[0] == '\0') {
+        ESP_LOGE(TAG, "历史云注册模式缺少 register_url");
+        return ESP_ERR_INVALID_STATE;
+    }
+#else
+    const char *path = strncmp(c->rtsp_push_url, "rtsp://", 7) == 0
+                           ? strchr(c->rtsp_push_url + 7, '/') : NULL;
+    if (path == NULL || path == c->rtsp_push_url + 7 || path[1] == '\0') {
+        ESP_LOGE(TAG, "请配置本地边缘代理 rtsp_push_url（rtsp://<edge>:8554/<camera_id>）；不会回退云注册");
+        return ESP_ERR_INVALID_STATE;
+    }
+#endif
+    return ESP_OK;
 }
 
 /* ─────────────────────────── SD 卡 ─────────────────────────── */
@@ -180,6 +205,7 @@ static esp_err_t parse_json(cam_config_t *c, const char *text)
     json_str_into(c->camera_id, sizeof(c->camera_id), root, "camera_id", NULL);
     json_str_into(c->workshop_id, sizeof(c->workshop_id), root, "workshop_id", NULL);
     json_str_into(c->register_url, sizeof(c->register_url), root, "register_url", NULL);
+    json_str_into(c->rtsp_push_url, sizeof(c->rtsp_push_url), root, "rtsp_push_url", NULL);
     json_str_into(c->codec, sizeof(c->codec), root, "codec", NULL);
 
     const cJSON *wifi = cJSON_GetObjectItemCaseSensitive(root, "wifi");
@@ -229,12 +255,7 @@ static esp_err_t parse_json(cam_config_t *c, const char *text)
 
     cJSON_Delete(root);
 
-    if (c->camera_id[0] == '\0' || c->workshop_id[0] == '\0' || c->register_url[0] == '\0' ||
-        c->wifi_ssid[0] == '\0') {
-        ESP_LOGE(TAG, "缺少必填字段：camera_id / workshop_id / register_url / wifi.ssid");
-        return ESP_FAIL;
-    }
-    return ESP_OK;
+    return validate_config(c);
 }
 
 static esp_err_t load_from_sd(cam_config_t *c)
@@ -279,14 +300,17 @@ static esp_err_t load_from_nvs(cam_config_t *c)
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
         return ESP_ERR_NOT_FOUND;
     }
-    size_t size = sizeof(*c);
-    esp_err_t err = nvs_get_blob(h, NVS_KEY_BLOB, c, &size);
-    nvs_close(h);
-    if (err != ESP_OK || size != sizeof(*c)) {
+    size_t size = 0;
+    esp_err_t err = nvs_get_blob(h, NVS_KEY_BLOB, NULL, &size);
+    /* 旧布局为新增 rtsp_push_url 之前的完整前缀；保留 Wi-Fi、画质及原身份关联。 */
+    if (err != ESP_OK || (size != sizeof(*c) && size != offsetof(cam_config_t, rtsp_push_url))) {
+        nvs_close(h);
         return ESP_ERR_NOT_FOUND;
     }
-    /* NVS 里可能存的是更老一版的固件写下的结构，字段长度对不上就当作没有 */
-    if (c->camera_id[0] == '\0' || c->wifi_ssid[0] == '\0') {
+    fill_defaults(c);
+    err = nvs_get_blob(h, NVS_KEY_BLOB, c, &size);
+    nvs_close(h);
+    if (err != ESP_OK || c->camera_id[0] == '\0' || c->wifi_ssid[0] == '\0') {
         return ESP_ERR_NOT_FOUND;
     }
     c->source = CAM_CFG_SRC_NVS;
@@ -335,18 +359,12 @@ esp_err_t cam_config_load(cam_config_t *out)
         s_cfg = from_nvs;
         ESP_LOGI(TAG, "配置来源：NVS 备份");
         *out = s_cfg;
-        return ESP_OK;
+        return validate_config(&s_cfg);
     }
 
     ESP_LOGW(TAG, "无 SD 卡配置也无 NVS 备份，使用编译期默认值");
-    if (s_cfg.camera_id[0] == '\0' || s_cfg.workshop_id[0] == '\0' || s_cfg.register_url[0] == '\0' ||
-        s_cfg.wifi_ssid[0] == '\0') {
-        ESP_LOGE(TAG, "编译期默认值不完整：请放入 SD 卡 camera.json，或用 menuconfig 填默认值");
-        return ESP_ERR_INVALID_STATE;
-    }
-
     *out = s_cfg;
-    return ESP_OK;
+    return validate_config(&s_cfg);
 }
 
 const cam_config_t *cam_config_get(void)
@@ -365,7 +383,11 @@ void cam_config_dump(const cam_config_t *cfg)
     ESP_LOGI(TAG, "  来源:        %s", src_names[cfg->source]);
     ESP_LOGI(TAG, "  camera_id:   %s", cfg->camera_id);
     ESP_LOGI(TAG, "  workshop_id: %s", cfg->workshop_id);
-    ESP_LOGI(TAG, "  register:    %s", cfg->register_url);
+#if CONFIG_CAM_LEGACY_CLOUD_REGISTER
+    ESP_LOGI(TAG, "  接入模式:    历史云注册");
+#else
+    ESP_LOGI(TAG, "  接入模式:    本地边缘代理（不发起云注册）");
+#endif
     ESP_LOGI(TAG, "  wifi.ssid:   %s", cfg->wifi_ssid);
     ESP_LOGI(TAG, "  wifi.pass:   %s", cfg->wifi_password[0] != '\0' ? "***" : "(空)");
     ESP_LOGI(TAG, "  codec:       %s", cfg->codec);

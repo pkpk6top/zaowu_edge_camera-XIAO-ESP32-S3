@@ -1,23 +1,20 @@
 # 凿物 · 摄像头端固件（XIAO ESP32S3 Sense）
 
-工坊里那台摄像头自证身份、把画面推给边缘服务器的固件。链路与边缘 agent 的分工一致：
+摄像头连接工坊 Wi-Fi，按现场配置把 MJPEG 画面推给边缘代理。机位仍需在平台登记并配置到代理；控制面通信、转码和云端推流由代理负责。摄像头不需要直连云端 HTTPS。
 
 ```mermaid
 flowchart LR
-    Cloud["云端平台"]
-    Edge["边缘 agent<br/>ingest :8554"]
-    Cam["XIAO ESP32S3 Sense<br/>（本固件）"]
-
-    Cam -- "① 注册（ed25519 自证）" --> Cloud
-    Cloud -- "② 返回 edge_ip / ingest_port / rtsp_push_url" --> Cam
-    Cam -- "③ RTSP 推流（ANNOUNCE/SETUP/RECORD + MJPEG）" --> Edge
-    Cloud -. "④ 控制面下发 camera_config" .-> Edge
+    Cam["摄像头"] -- "RTSP / MJPEG" --> Edge["现场边缘代理 ingest :8554"]
+    Cloud["云端平台"] -. "登记与控制配置" .-> Edge
+    Edge -- "转码与直播推流" --> Cloud
 ```
 
-摄像头**只**做三件事：连 Wi-Fi、抓帧、推流。剩下的一律由平台在注册后下发，
-与边缘 agent 的 `bootstrap.json` 是同一口径 —— 现场改配置只需要换 SD 卡上的 `camera.json`，
-不用重新编译固件。
+`camera.json` 中配置已登记机位的 `camera_id`、`workshop_id`、Wi-Fi 和本地 `rtsp_push_url`。
+默认启动不调用云端注册、不等待云端响应或 SNTP 校时；即使保留旧 `register_url` 也不会开启云注册。
+配置缺少本地推流地址时会明确报错，不会退回云端寻找地址。
 
+历史摄像头直连注册代码保留为默认关闭的 `CONFIG_CAM_LEGACY_CLOUD_REGISTER`，仅供旧设计排查。
+该历史路径不作为当前打印、直播和观看的验收前置。
 ---
 
 ## 一、目录结构
@@ -33,11 +30,11 @@ XIAO-ESP32-S3/
     ├── CMakeLists.txt
     ├── idf_component.yml     # esp32-camera / esp_rtsp_service / esp_media_service / esp_service
     ├── Kconfig.projbuild     # 编译期默认值（只在无 SD、无 NVS 时生效）
-    ├── app_main.c            # 主流程：配置 → Wi-Fi → 摄像头 → 注册 → 推流 → 保活
+    ├── app_main.c            # 主流程：配置 → Wi-Fi → 摄像头 → 本地边缘推流 → 保活
     ├── cam_config.c/.h       # 配置三级加载（SD → NVS → 编译期）
     ├── wifi.c/.h             # Wi-Fi STA（SSID/密码来自配置，断线自动重连）
     ├── camera.c/.h           # OV2640 初始化（分辨率/画质/翻转/画面参数来自配置）
-    ├── register.c/.h         # 平台注册（设备身份 + ed25519 签名 + HTTPS）
+    ├── register.c/.h         # 历史云注册（仅显式启用旧模式时调用）
     ├── rtsp_push.c/.h        # MJPEG 源服务 + RTSP SINK 推流
     └── ed25519.c/.h          # 自带 Ed25519 实现（原因见第五节）
 ```
@@ -52,7 +49,7 @@ XIAO-ESP32-S3/
 {
   "camera_id":   "cam-03",
   "workshop_id": "ws-001",
-  "register_url": "https://cloud.example.com/api/camera/register",
+  "rtsp_push_url": "rtsp://192.168.1.50:8554/cam-03",
 
   "wifi": { "ssid": "workshop-ap", "password": "xxxxxxxx" },
 
@@ -94,7 +91,8 @@ XIAO-ESP32-S3/
 | --- | --- | --- | --- |
 | `camera_id` | ✅ | — | 平台分配的摄像头唯一标识，也是推流路径（`/cam-03`） |
 | `workshop_id` | ✅ | — | 所属工坊 ID |
-| `register_url` | ✅ | — | 平台注册接口（HTTPS，走系统 CA 校验） |
+| `rtsp_push_url` | ✅ | — | 本地边缘代理 ingest 的完整地址，例如 `rtsp://192.168.1.50:8554/cam-03` |
+| `register_url` | 历史模式 | — | 仅显式启用 `CONFIG_CAM_LEGACY_CLOUD_REGISTER` 时使用的云端注册地址 |
 | `wifi.ssid` / `wifi.password` | ✅ / ❌ | — / 空 | 密码留空 = 开放 AP |
 | `video.resolution` | ❌ | `VGA` | `QQVGA` / `QVGA` / `VGA`（`480p`） / `SVGA` / `XGA` / `HD`（`720p`） / `SXGA` / `UXGA` / `FHD`（`1080p`） / `QXGA`；超出传感器上限（OV2640→UXGA，OV3660→QXGA）会被夹到上限并告警 |
 | `video.jpeg_quality` | ❌ | `10` | 0–63，越小画质越好（12 → 10：码率涨约三成，压缩伪影与颗粒感都轻些） |
@@ -103,7 +101,7 @@ XIAO-ESP32-S3/
 | `video.vflip` / `hmirror` | ❌ | `1` / `1` | 画面翻转 / 镜像；两个都开 = 画面转 180°（机位倒装时这么设） |
 | `image.*` | ❌ | 见下 | 画面参数（白平衡 / 曝光 / 增益 / 画质），整段可选 |
 | `codec` | ❌ | `MJPEG` | 目前只实现了 MJPEG（见第五节） |
-| `retry.register_max_attempts` | ❌ | `10` | 注册失败重试次数，用尽则重启 |
+| `retry.register_max_attempts` | 历史模式 | `10` | 旧云注册失败重试次数，用尽则重启 |
 | `retry.register_backoff_ms` | ❌ | `5000` | 每次重试的间隔 |
 
 ### `image` 段（画面参数）
@@ -175,17 +173,19 @@ idf.py -B build-eye -D SDKCONFIG=sdkconfig.eye -D "SDKCONFIG_DEFAULTS=sdkconfig.
 该配置使用 16MB Flash、8MB OPI PSRAM 和 20MHz XCLK；摄像头引脚为
 XCLK=15、SDA=4、SCL=5、D7..D0=16/17/18/12/10/8/9/11、VSYNC=6、HREF=7、PCLK=13。
 GPIO 7/8/9 与 XIAO 的 SD SPI 定义冲突，因此此模式完全跳过 SD 初始化，
-配置只从 NVS 或编译期默认值读取。身份、Wi-Fi 及注册地址仍须按现场配置，不能使用其他机位的值。
+配置只从 NVS 或编译期默认值读取。机位标识、Wi-Fi 及本地边缘推流地址仍须按现场配置，不能使用其他机位的值。
 
 上述命令仅编译。首次迁移须核对接线、串口、分区表与已登记身份，并保留当前固件和 NVS 的回退备份；
-不要执行 `erase-flash`。板型适配不改变 HTTPS 证书校验，也不代表原生注册已通过实机验收。
-签名注册会先通过 SNTP 限时等待校时；校时失败时不发送带错误时间戳的注册请求。
+不要执行 `erase-flash`。板型适配不改变历史云注册模式的 HTTPS 证书校验。默认本地接入不调用该模式。
+只有显式启用历史签名注册时，才先通过 SNTP 限时等待校时；校时失败时不发送带错误时间戳的请求。
+
+旧 NVS 配置的原 904 字节字段布局保持不变；升级读取旧配置时保留 Wi-Fi、机位和画质，新增推流地址使用 `CONFIG_CAM_RTSP_PUSH_URL`。因此无 SD 的旧机位升级前需配置该本地地址，不能擦除 NVS 或设备身份来迁移。
 
 XIAO 原有构建方式：
 
 ```bash
 idf.py set-target esp32s3
-idf.py menuconfig      # 可选：填 camera_id / workshop_id / register_url / Wi-Fi 默认值
+idf.py menuconfig      # 可选：填 camera_id / workshop_id / rtsp_push_url / Wi-Fi 默认值
 idf.py build
 idf.py -p <串口> flash monitor
 ```
@@ -208,10 +208,8 @@ I (1264) cam_cfg:   video:       VGA @30fps q=10 fb=2
 I (1266) cam_cfg:   flip/mirror: 1/1
 I (1268) cam_cfg:   image:       awb=1/1 wb_mode=0 aec=1/1 ae=0 agc=1/ceil=1
 I (1270) cam_cfg: ───────────────────────────────
-I (1280) ed25519: Ed25519 自检通过（RFC 8032 §7.1 两组向量）
 I (1290) wifi: 获取 IP: 192.168.1.77
-I (1400) register: 边缘服务器: 192.168.1.50:8554
-I (1405) register: 推流地址: rtsp://192.168.1.50:8554/cam-03
+I (1400) app: 使用本地边缘代理配置，不发起云端注册
 I (1500) rtsp_push: 推流会话已建立（RECORD）
 ```
 
@@ -221,7 +219,9 @@ I (1500) rtsp_push: 推流会话已建立（RECORD）
 
 ---
 
-## 四、注册接口约定
+## 四、历史云注册接口（默认关闭）
+
+以下只适用于显式开启 `CONFIG_CAM_LEGACY_CLOUD_REGISTER=y` 的历史构建。正常本地边缘接入不执行这些步骤，也不依赖该接口可用。
 
 `POST {register_url}`，`Content-Type: application/json`：
 
@@ -332,7 +332,8 @@ ESP-IDF v5.5 内置的 mbedtls 3.6.6 只声明了 `PSA_ALG_PURE_EDDSA` 这个算
 - **推流断了**：主循环每 30 秒检查一次 RTSP 会话，断了就重建推流
   （边缘服务器重启、网络抖动都会让会话消失）。
 - **Wi-Fi 断了**：事件回调里无限重连。
-- **注册失败**：按 `retry` 配置退避重试，用尽后重启设备。
+- **本地地址缺失**：填写已登记机位对应的 `rtsp_push_url`；固件不会自动改用旧云注册。
+- **历史模式注册失败**：仅显式启用旧模式时，按 `retry` 配置退避重试，用尽后重启设备。
 - **密码脱敏**：`cam_config_dump()` 只打 `***`，不会把 Wi-Fi 密码写进日志。
 
 ---
@@ -344,6 +345,18 @@ ESP-IDF v5.5 内置的 mbedtls 3.6.6 只声明了 `PSA_ALG_PURE_EDDSA` 这个算
   `COM11` 之类），没做
 - **锐度 / 降噪**：OV2640 的 `set_sharpness` / `set_denoise` 在 esp32-camera 里是空实现，
   调不了 —— 颗粒感只能靠 `gainceiling` 与 `jpeg_quality` 压
-- **平台覆盖配置**：目前配置只从 SD/NVS/Kconfig 来，平台还不能在注册响应里下发
-  `resolution` / `fps` / `image` 等参数来覆盖本地配置
-- **摄像头端的分级重连**：现在注册失败用固定退避，没做指数退避
+- **摄像头画质远程配置**：目前固件配置只从 SD/NVS/Kconfig 来，边缘代理尚不能直接覆盖摄像头的
+  `resolution` / `fps` / `image` 等参数；此变更不新增代理代注册协议
+- **历史注册模式的分级重连**：旧模式注册失败使用固定退避，未实现指数退避
+
+
+## 八、本地接入回归
+
+使用宿主 GCC 和 ESP-IDF 自带 cJSON 执行，不连接摄像头或云端：
+
+```text
+python tests/run_edge_only_host.py --idf-path <ESP-IDF目录>
+```
+
+覆盖默认无云注册地址、旧地址不触发云注册、缺失/错误本地地址拒绝、旧 NVS 配置迁移、
+新配置往返、初次推流与断线重建，以及显式历史注册模式。宿主回归与双板型编译不代替实机验收。

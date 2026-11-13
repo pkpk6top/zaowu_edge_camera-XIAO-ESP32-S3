@@ -1,7 +1,7 @@
 /*
  * 摄像头端主流程。
  *
- * 摄像头 → 平台注册（ed25519 自证）→ 平台下发 edge_ip:ingest_port → RTSP 推流到边缘服务器。
+ * 摄像头按现场配置直接向边缘代理推流，由边缘代理对接云端。
  */
 #include <string.h>
 
@@ -66,7 +66,7 @@ void app_main(void)
     ESP_ERROR_CHECK(cam_config_load(&cfg));
     cam_config_dump(&cfg);
 
-#if CONFIG_CAM_REGISTER_USE_SIGNATURE
+#if CONFIG_CAM_LEGACY_CLOUD_REGISTER && CONFIG_CAM_REGISTER_USE_SIGNATURE
     /* ── 3. 密码学自检：注册要用 ed25519 签名，先在本地确认实现没被改坏 ── */
     if (ed25519_selftest() != ESP_OK) {
         ESP_LOGE(TAG, "Ed25519 自检未通过，注册签名不可信");
@@ -85,7 +85,9 @@ void app_main(void)
         restart_after("摄像头初始化失败");
     }
 
-    /* ── 6. 向平台注册，换取边缘服务器地址 ── */
+    const char *push_url = cfg.rtsp_push_url;
+#if CONFIG_CAM_LEGACY_CLOUD_REGISTER
+    /* 仅显式启用历史模式时，才直连云端注册。 */
     for (int attempt = 1;; attempt++) {
         ESP_LOGI(TAG, "向平台注册（第 %d 次）...", attempt);
         if (camera_register_to_platform() == ESP_OK) {
@@ -98,12 +100,16 @@ void app_main(void)
         vTaskDelay(pdMS_TO_TICKS(cfg.register_backoff_ms));
     }
 
+    push_url = camera_get_edge_info()->rtsp_push_url;
+#else
+    ESP_LOGI(TAG, "使用本地边缘代理配置，不发起云端注册");
+#endif
+
     /* ── 7. 推流 ── */
-    const edge_info_t *edge = camera_get_edge_info();
-    if (rtsp_push_start(edge->rtsp_push_url) != ESP_OK) {
+    if (rtsp_push_start(push_url) != ESP_OK) {
         restart_after("RTSP 推流启动失败");
     }
-    ESP_LOGI(TAG, "摄像头端已就绪：%s", edge->rtsp_push_url);
+    ESP_LOGI(TAG, "摄像头端已就绪");
 
     /* ── 8. 主循环：会话断了就重建（边缘服务器重启、网络抖动都会把会话收掉）── */
     while (true) {
@@ -115,7 +121,7 @@ void app_main(void)
 
         ESP_LOGW(TAG, "推流会话不在，重建中...");
         rtsp_push_stop();
-        if (rtsp_push_start(edge->rtsp_push_url) != ESP_OK) {
+        if (rtsp_push_start(push_url) != ESP_OK) {
             restart_after("推流重建失败");
         }
     }
