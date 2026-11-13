@@ -1,5 +1,13 @@
 menu "Camera Agent Configuration"
 
+    config CAM_BOARD_ESP32S3_EYE
+        bool "ESP32S3_EYE camera wiring without SD card"
+        default n
+        help
+            使用 ESP32S3_EYE 接线与 20MHz XCLK。该接线与 XIAO 的
+            SD SPI 引脚冲突，因此跳过 SD 初始化，配置取 NVS 或编译期默认值。
+            仅在板卡接线已核对时启用；默认仍使用 XIAO ESP32S3 Sense。
+
     comment "以下默认值只在「既无 SD 卡配置、也无 NVS 备份」时生效（出厂固件兜底）。"
     comment "现场改配置请编辑 SD 卡根目录的 camera.json，不要重新编译固件。"
 

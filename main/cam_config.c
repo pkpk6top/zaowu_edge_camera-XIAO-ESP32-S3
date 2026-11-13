@@ -104,6 +104,11 @@ static void fill_defaults(cam_config_t *c)
 
 static esp_err_t mount_sd(void)
 {
+#if CONFIG_CAM_BOARD_ESP32S3_EYE
+    /* XIAO 的 SD GPIO 7/8/9 在此接线中是摄像头信号，不可初始化 SPI。 */
+    ESP_LOGI(TAG, "ESP32S3_EYE 无 SD 模式，使用 NVS 或编译期配置");
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     spi_bus_config_t bus = {
         .mosi_io_num     = SD_PIN_MOSI,
         .miso_io_num     = SD_PIN_MISO,
@@ -139,6 +144,7 @@ static esp_err_t mount_sd(void)
     }
     ESP_LOGI(TAG, "SD 卡已挂载: %s", card->cid.name);
     return ESP_OK;
+#endif
 }
 
 /* ─────────────────────────── JSON 解析 ─────────────────────────── */

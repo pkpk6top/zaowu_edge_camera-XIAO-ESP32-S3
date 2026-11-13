@@ -165,6 +165,24 @@ OV2640（本机那颗，XCLK 24MHz）实测：
 
 ## 三、编译与烧录
 
+默认接线为 XIAO ESP32S3 Sense。ESP32-S3 N16R8 / OV5640 使用已核对的
+ESP32S3_EYE 接线时，在独立构建目录追加板型配置：
+
+```sh
+idf.py -B build-eye -D SDKCONFIG=sdkconfig.eye -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.defaults.esp32s3-eye" -D IDF_TARGET=esp32s3 build
+```
+
+该配置使用 16MB Flash、8MB OPI PSRAM 和 20MHz XCLK；摄像头引脚为
+XCLK=15、SDA=4、SCL=5、D7..D0=16/17/18/12/10/8/9/11、VSYNC=6、HREF=7、PCLK=13。
+GPIO 7/8/9 与 XIAO 的 SD SPI 定义冲突，因此此模式完全跳过 SD 初始化，
+配置只从 NVS 或编译期默认值读取。身份、Wi-Fi 及注册地址仍须按现场配置，不能使用其他机位的值。
+
+上述命令仅编译。首次迁移须核对接线、串口、分区表与已登记身份，并保留当前固件和 NVS 的回退备份；
+不要执行 `erase-flash`。板型适配不改变 HTTPS 证书校验，也不代表原生注册已通过实机验收。
+签名注册会先通过 SNTP 限时等待校时；校时失败时不发送带错误时间戳的注册请求。
+
+XIAO 原有构建方式：
+
 ```bash
 idf.py set-target esp32s3
 idf.py menuconfig      # 可选：填 camera_id / workshop_id / register_url / Wi-Fi 默认值

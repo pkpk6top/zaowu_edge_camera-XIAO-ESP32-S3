@@ -1,0 +1,5 @@
+# ESP32-S3 N16R8 / OV5640，已核对的 ESP32S3_EYE 接线。
+# 在通用 defaults 与 esp32s3 defaults 之后追加；不包含现场身份或 Wi-Fi 凭据。
+CONFIG_CAM_BOARD_ESP32S3_EYE=y
+# CONFIG_ESPTOOLPY_FLASHSIZE_8MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
