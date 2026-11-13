@@ -1,8 +1,8 @@
 /*
  * 摄像头端配置：SD 卡 → NVS → 编译期默认值 三级加载。
  *
- * 与边缘 agent 的 bootstrap.json 同一口径：只放「我是谁、怎么连平台」两件事，
- * 其余（JWT、边缘服务器地址、推流地址）全部由平台注册后下发。
+ * 摄像头只连接现场边缘代理；保留平台机位登记，控制面及云端推流由代理负责。
+ * 旧云端注册仅供显式启用的历史模式使用。
  *
  * ⚠ 类型名刻意不叫 camera_config_t —— esp32-camera 的 esp_camera.h 已经占用了这个名字。
  */
@@ -64,7 +64,7 @@ typedef struct {
     char workshop_id[CAM_CFG_STR_MAX];  /*!< 所属工坊 ID */
 
     /* ── 必填：怎么连 ── */
-    char register_url[CAM_CFG_URL_MAX]; /*!< 平台摄像头注册接口（HTTPS） */
+    char register_url[CAM_CFG_URL_MAX]; /*!< 仅历史云注册模式使用 */
     char wifi_ssid[CAM_CFG_STR_MAX];
     char wifi_password[CAM_CFG_STR_MAX];
 
@@ -86,6 +86,9 @@ typedef struct {
     int register_backoff_ms;
 
     cam_cfg_source_t source;
+
+    /* 只追加新字段，保留历史 NVS blob 的字段布局。 */
+    char rtsp_push_url[CAM_CFG_URL_MAX]; /*!< 本地边缘代理 RTSP ingest 地址 */
 } cam_config_t;
 
 /**

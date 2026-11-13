@@ -1,7 +1,7 @@
 {
   "camera_id": "cam-03",
   "workshop_id": "ws-001",
-  "register_url": "https://cloud.example.com/api/camera/register",
+  "rtsp_push_url": "rtsp://192.168.1.50:8554/cam-03",
 
   "wifi": {
     "ssid": "workshop-ap",

@@ -19,9 +19,23 @@ menu "Camera Agent Configuration"
         string "默认 workshop_id"
         default "ws-001"
 
+    config CAM_RTSP_PUSH_URL
+        string "本地边缘代理 RTSP 推流地址"
+        default ""
+        help
+            填写已登记机位的现场边缘代理地址，例如
+            rtsp://192.168.1.50:8554/cam-03。默认流程不连接云端 HTTPS。
+
+    config CAM_LEGACY_CLOUD_REGISTER
+        bool "启用历史摄像头直连云端注册（非当前接入流程）"
+        default n
+        help
+            仅用于旧设计排查。显式启用后才向 register_url 注册并等待
+            云端下发推流地址；已有 register_url 或 NVS 配置不会自动启用。
+
     config CAM_REGISTER_URL
-        string "默认 register_url"
-        default "https://cloud.example.com/api/camera/register"
+        string "历史模式 register_url"
+        default ""
 
     config CAM_WIFI_SSID
         string "默认 Wi-Fi SSID"
