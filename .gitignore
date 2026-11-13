@@ -1,6 +1,9 @@
 # 生成物（配置基线是 sdkconfig.defaults / sdkconfig.defaults.esp32s3）
 build/
+build-eye/
 sdkconfig
 sdkconfig.old
+sdkconfig.eye
+sdkconfig.eye.old
 managed_components/
 

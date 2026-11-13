@@ -5,9 +5,30 @@
 #include "cam_config.h"
 #include "esp_camera.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "camera";
 
+#if CONFIG_CAM_BOARD_ESP32S3_EYE
+/* ESP32-S3 N16R8 / OV5640 已验证的 ESP32S3_EYE 接线。 */
+#define CAM_PIN_PWDN   -1
+#define CAM_PIN_RESET  -1
+#define CAM_PIN_XCLK   15
+#define CAM_PIN_SIOD   4
+#define CAM_PIN_SIOC   5
+#define CAM_PIN_D7     16
+#define CAM_PIN_D6     17
+#define CAM_PIN_D5     18
+#define CAM_PIN_D4     12
+#define CAM_PIN_D3     10
+#define CAM_PIN_D2     8
+#define CAM_PIN_D1     9
+#define CAM_PIN_D0     11
+#define CAM_PIN_VSYNC  6
+#define CAM_PIN_HREF   7
+#define CAM_PIN_PCLK   13
+#define CAM_XCLK_HZ    20000000
+#else
 /* XIAO ESP32S3 Sense 的 OV2640 引脚（Seeed 官方定义，与 Sense 扩展板一一对应） */
 #define CAM_PIN_PWDN   -1
 #define CAM_PIN_RESET  -1
@@ -27,6 +48,8 @@ static const char *TAG = "camera";
 #define CAM_PIN_VSYNC  38
 #define CAM_PIN_HREF   47
 #define CAM_PIN_PCLK   13
+#define CAM_XCLK_HZ    24000000
+#endif
 
 typedef struct {
     const char *name;
@@ -199,9 +222,8 @@ esp_err_t camera_init(void)
         .pin_href     = CAM_PIN_HREF,
         .pin_pclk     = CAM_PIN_PCLK,
 
-        /* OV2640/OV3660 的 XVCLK 允许 6~27MHz，典型 24MHz。给 20MHz 时 VGA 实测只有
-         * ~23fps（逼近 24fps 下限），提到 24MHz 把读出速率拉上来，实测约 28fps。 */
-        .xclk_freq_hz = 24000000,
+        /* XIAO 保持原 24MHz，ESP32S3_EYE 接线使用已验证的 20MHz。 */
+        .xclk_freq_hz = CAM_XCLK_HZ,
         .ledc_timer   = LEDC_TIMER_0,
         .ledc_channel = LEDC_CHANNEL_0,
 
