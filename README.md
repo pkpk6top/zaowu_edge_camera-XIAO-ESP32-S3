@@ -356,7 +356,11 @@ ESP-IDF v5.5 内置的 mbedtls 3.6.6 只声明了 `PSA_ALG_PURE_EDDSA` 这个算
 
 ```text
 python tests/run_edge_only_host.py --idf-path <ESP-IDF目录>
+python tests/run_capture_timing_host.py
 ```
 
 覆盖默认无云注册地址、旧地址不触发云注册、缺失/错误本地地址拒绝、旧 NVS 配置迁移、
 新配置往返、初次推流与断线重建，以及显式历史注册模式。宿主回归与双板型编译不代替实机验收。
+
+采集时间回归直接运行生产采集函数，覆盖低帧率、队列丢帧、抓帧失败和重新启动后的时间轴，
+验证媒体时间按单调时钟推进，不按请求帧率压缩。
