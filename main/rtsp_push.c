@@ -55,6 +55,7 @@ static const char *TAG = "rtsp_push";
 typedef struct {
     esp_media_service_t     media; /*!< 必须是第一个成员 */
     esp_media_track_mngr_t *mngr;
+    esp_media_provider_ops_t provider_ops;
     TaskHandle_t            task;
     volatile bool           running;
     uint16_t                width;
@@ -147,6 +148,39 @@ static esp_err_t camera_source_get_role(esp_service_t *service, esp_media_role_t
     return ESP_OK;
 }
 
+/* MJPEG 每帧独立可解码。发送慢时只保留队列快照中的最新帧，
+ * 不把数秒前的 FIFO 积压继续送给观看端。只在消费线程释放旧帧。 */
+static esp_err_t camera_source_read_latest(void *ctx, esp_media_frame_t *out_frame, uint32_t timeout_ms)
+{
+    if (out_frame == NULL || out_frame->data == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_media_track_mngr_t *mngr = ctx;
+    esp_media_provider_t provider;
+    esp_err_t err = esp_media_track_mngr_get_provider(mngr, &provider);
+    if (err != ESP_OK) {
+        return err;
+    }
+    esp_media_track_mngr_queue_info_t queued;
+    err = esp_media_track_mngr_query(mngr, ESP_MEDIA_TRACK_TYPE_VIDEO, &queued);
+    if (err != ESP_OK) {
+        return err;
+    }
+    /* 固定快照大小，避免生产者持续写入时消费循环无法返回。 */
+    for (int i = 1; i < queued.q_num; i++) {
+        esp_media_frame_t stale = {.track_id = CAMERA_TRACK_ID, .type = ESP_MEDIA_TRACK_TYPE_VIDEO};
+        err = esp_media_provider_acquire_frame(&provider, &stale, 0);
+        if (err != ESP_OK) {
+            return err;
+        }
+        err = esp_media_provider_release_frame(&provider, &stale);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    return esp_media_provider_read_frame(&provider, out_frame, timeout_ms);
+}
+
 static esp_err_t camera_source_get_provider(esp_service_t *service, esp_media_stream_id_t stream,
                                             esp_media_provider_t *out_provider)
 {
@@ -154,7 +188,14 @@ static esp_err_t camera_source_get_provider(esp_service_t *service, esp_media_st
     if (stream != ESP_MEDIA_DEFAULT_STREAM) {
         return ESP_ERR_INVALID_ARG;
     }
-    return esp_media_track_mngr_get_provider(src->mngr, out_provider);
+    esp_err_t err = esp_media_track_mngr_get_provider(src->mngr, out_provider);
+    if (err == ESP_OK) {
+        /* 元数据、事件和 abort 仍使用原接口和原 ctx，只替换复制读帧。 */
+        src->provider_ops = *out_provider->ops;
+        src->provider_ops.read_frame = camera_source_read_latest;
+        out_provider->ops = &src->provider_ops;
+    }
+    return err;
 }
 
 static esp_err_t camera_source_on_start(esp_service_t *service)
