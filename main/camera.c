@@ -176,7 +176,17 @@ static void apply_image_params(sensor_t *sensor, const cam_image_cfg_t *img)
     sensor->set_aec2(sensor, img->aec2);
     sensor->set_ae_level(sensor, img->ae_level);
     sensor->set_gain_ctrl(sensor, img->agc);
-    sensor->set_gainceiling(sensor, (gainceiling_t)img->gainceiling);
+    int ceiling = img->gainceiling;
+    if (sensor->id.PID == OV5640_PID) {
+        /* OV2640 接收 0..6 档位；OV5640 驱动直接写 10 位寄存器，
+         * 以 1/16 倍为单位。不能把档位 1（4X）直接写成 1/16X。 */
+        ceiling = 16 << (ceiling + 1);
+        if (ceiling > 0x3ff) {
+            ceiling = 0x3ff;
+        }
+        ESP_LOGI(TAG, "OV5640 gain ceiling: level=%d register=%d", img->gainceiling, ceiling);
+    }
+    sensor->set_gainceiling(sensor, (gainceiling_t)ceiling);
     if (img->aec_value >= 0) {
         sensor->set_aec_value(sensor, img->aec_value);
     }

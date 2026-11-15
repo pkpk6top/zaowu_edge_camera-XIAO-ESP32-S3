@@ -72,11 +72,8 @@ static void fill_defaults(cam_config_t *c)
     c->vflip        = 1;
     c->hmirror      = 1;
 
-    /* 画面参数默认值：按「偏色 + 发灰 + 噪点」这三个症状调的一版
-     *   - 偏色  → AWB 全自动 + 白平衡增益 + 镜头校正(lenc，四周色晕)
-     *   - 发灰  → contrast +1，并确保原始伽马校正开着
-     *   - 噪点  → 增益上限收到 4X（默认更松，暗处会拉出彩色噪点）
-     * 追求画质优先的，把 gainceiling 放回 2/3，或把 aec_value/agc_gain 锁手动。 */
+    /* 自动曝光与白平衡，默认中性对比度，避免压暗暗部。
+     * 增益档位统一使用 0..6；camera.c 按传感器转换驱动所需的值。 */
     c->image.awb            = 1;
     c->image.awb_gain       = 1;
     c->image.wb_mode        = 0;  /* 自动 */
@@ -88,7 +85,7 @@ static void fill_defaults(cam_config_t *c)
     c->image.agc_gain       = -1; /* 不手动锁增益 */
     c->image.gainceiling    = 1;  /* 4X */
     c->image.brightness     = 0;
-    c->image.contrast       = 1;
+    c->image.contrast       = 0;
     c->image.saturation     = 0;
     c->image.special_effect = 0;
     c->image.lenc           = 1;
@@ -105,6 +102,10 @@ static void fill_defaults(cam_config_t *c)
 /* 同一校验用于 SD、NVS 和默认配置，旧 register_url 不选择运行模式。 */
 static esp_err_t validate_config(const cam_config_t *c)
 {
+    if (c->image.gainceiling < 0 || c->image.gainceiling > 6) {
+        ESP_LOGE(TAG, "image.gainceiling 必须是 0..6 档位");
+        return ESP_ERR_INVALID_ARG;
+    }
     if (c->camera_id[0] == '\0' || c->workshop_id[0] == '\0' || c->wifi_ssid[0] == '\0') {
         ESP_LOGE(TAG, "缺少必填字段：camera_id / workshop_id / wifi.ssid");
         return ESP_ERR_INVALID_STATE;

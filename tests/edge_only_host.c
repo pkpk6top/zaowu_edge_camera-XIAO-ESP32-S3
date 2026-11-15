@@ -53,6 +53,18 @@ int main(void)
 {
     cam_config_t c;
     fill_defaults(&c);
+    assert(c.image.contrast == 0);
+    for (int level = 0; level <= 6; level++) {
+        c.image.gainceiling = level;
+#if !CONFIG_CAM_LEGACY_CLOUD_REGISTER
+        assert(validate_config(&c) == ESP_OK);
+#endif
+    }
+    c.image.gainceiling = -1;
+    assert(validate_config(&c) == ESP_ERR_INVALID_ARG);
+    c.image.gainceiling = 7;
+    assert(validate_config(&c) == ESP_ERR_INVALID_ARG);
+    fill_defaults(&c);
 #if CONFIG_CAM_LEGACY_CLOUD_REGISTER
     assert(validate_config(&c) == ESP_ERR_INVALID_STATE);
     assert(parse_json(&c, "{\"register_url\":\"https://cloud.example/register\"}") == ESP_OK);
