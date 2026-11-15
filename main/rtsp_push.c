@@ -27,6 +27,7 @@
 #include "esp_rtsp_service.h"
 #include "esp_rtsp_service_ops.h"
 #include "esp_service.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -37,10 +38,7 @@ static const char *TAG = "rtsp_push";
 #define CAMERA_TASK_STACK   4096
 #define CAMERA_TASK_PRIO    5
 #define CAMERA_TASK_CORE    1
-/* RTP 帧缓冲（一帧 JPEG 允许的最大尺寸）。
- * 别按「未压缩尺寸的一半」算：VGA 会得到 150KB，而这块缓冲走内部 RAM（media_lib 默认
- * malloc）—— 150KB 连续内存基本要不到，表现是「RECORD 成功但一个 RTP 包都不发」，
- * 对端看起来像没推流。VGA JPEG（q=12）实测 20~30KB，48KB 留足余量。 */
+/* VGA 及更小采集档的单帧 JPEG 缓冲；高分辨率在 setup 时单独扩容。 */
 #define RTP_FRAME_SIZE  (48 * 1024)
 
 /*
@@ -62,7 +60,6 @@ typedef struct {
     uint16_t                width;
     uint16_t                height;
     uint16_t                fps;
-    int64_t                 pts_ms;
 } camera_source_t;
 
 static camera_source_t s_source;
@@ -102,6 +99,7 @@ static void camera_capture_task(void *arg)
         period_ticks = 1;
     }
     TickType_t last_wake = xTaskGetTickCount();
+    const int64_t started_us = esp_timer_get_time();
 
     ESP_LOGI(TAG, "采集任务启动：%ux%u @%ufps", src->width, src->height, (unsigned)src->fps);
 
@@ -114,22 +112,22 @@ static void camera_capture_task(void *arg)
             continue;
         }
 
+        /* 实际帧率低于请求值或队列丢帧时，也要保留真实经过的时间。 */
+        const int64_t pts_ms = (esp_timer_get_time() - started_us) / 1000;
         esp_media_frame_t frame = {
             .track_id = CAMERA_TRACK_ID,
             .type = ESP_MEDIA_TRACK_TYPE_VIDEO,
             .data = fb->buf,
             .size = fb->len,
-            .pts = src->pts_ms,
-            .dts = src->pts_ms,
+            .pts = pts_ms,
+            .dts = pts_ms,
             /* MJPEG 每帧都能独立解码，一律当关键帧 */
             .flags = ESP_MEDIA_FRAME_FLAG_KEY,
         };
 
         /* 队列满就丢这一帧（timeout 0）：推流和采集不能互相拖死 */
         esp_err_t err = esp_media_track_write_frame(src->mngr, &frame, 0);
-        if (err == ESP_OK) {
-            src->pts_ms += interval_ms;
-        } else {
+        if (err != ESP_OK) {
             ESP_LOGD(TAG, "丢帧：%s", esp_err_to_name(err));
         }
 
@@ -165,7 +163,6 @@ static esp_err_t camera_source_on_start(esp_service_t *service)
 
     /* 上一次会话的残留（abort 状态、排队帧）清掉，重新计时 */
     esp_media_track_clear_abort(src->mngr);
-    src->pts_ms = 0;
     src->running = true;
 
     if (xTaskCreatePinnedToCore(camera_capture_task, "cam_capture", CAMERA_TASK_STACK, src, CAMERA_TASK_PRIO,
@@ -346,7 +343,12 @@ esp_err_t rtsp_push_start(const char *push_url)
          * 另外 agent 的 ingest 本来就是 TCP 的（gortsplib 服务端），走 TCP 才对得上。
          */
         setup.transport = RTSP_TRANSPORT_TCP;
-        setup.vid_frame_size = RTP_FRAME_SIZE;
+        /* FHD JPEG q=10 实测约 75KB，不能沿用 VGA 的 48KB 上限。
+         * 当前 PSRAM 构建的 media_lib 分配器使用外部 RAM；高分辨率
+         * 预留 512KB，低分辨率继续保留原来的内存占用。 */
+        setup.vid_frame_size = (uint32_t)s_source.width * s_source.height > 640U * 480U
+                                  ? 512U * 1024U
+                                  : RTP_FRAME_SIZE;
         err = esp_rtsp_service_setup(s_rtsp, &setup);
         if (err != ESP_OK) {
             goto fail;
